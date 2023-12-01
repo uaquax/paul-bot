@@ -206,7 +206,7 @@ async fn receive_city(
             ))
         })
         .collect();
-    buttons.push(InlineKeyboardButton::callback("Назад", "back"));
+    buttons.push(InlineKeyboardButton::callback("⬅️ Назад", "back"));
 
     let keyboard_rows: Vec<Vec<InlineKeyboardButton>> =
         buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
@@ -321,7 +321,7 @@ async fn receive_area(
                 ))
             })
             .collect();
-        buttons.push(InlineKeyboardButton::callback("Назад", "back"));
+        buttons.push(InlineKeyboardButton::callback("⬅️ Назад", "back"));
 
         let keyboard_rows: Vec<Vec<InlineKeyboardButton>> =
             buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
@@ -399,7 +399,7 @@ async fn receive_product(bot: Bot, dlg: MyDialogue, q: CallbackQuery) -> Handler
         })
         .collect();
 
-    buttons.push(InlineKeyboardButton::callback("Назад", "back"));
+    buttons.push(InlineKeyboardButton::callback("⬅️ Назад", "back"));
 
     let keyboard_rows: Vec<Vec<InlineKeyboardButton>> =
         buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
