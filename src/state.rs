@@ -1,18 +1,20 @@
+use crate::{area::Area, city::City, product::Product};
+
 #[derive(Clone, Default)]
 pub enum State {
     #[default]
     Start,
     Product,
     City {
-        product: String,
+        product: Product,
     },
     Area {
-        product: String,
-        city: String,
+        product: Product,
+        city: City,
     },
     ConfirmPurchase {
-        product: String,
-        city: String,
-        area: String,
+        product: Product,
+        city: City,
+        area: Area,
     },
 }

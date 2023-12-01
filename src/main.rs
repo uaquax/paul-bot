@@ -1,11 +1,17 @@
 mod api_response;
+mod area;
+mod city;
 mod command;
+mod product;
 mod state;
 
 use api_response::ApiResponse;
+use area::Area;
+use city::City;
 use dotenv::dotenv;
+use product::Product;
 use rand::Rng;
-use serde_json::Value;
+use serde_json::{json, Value};
 use state::State;
 use std::collections::HashMap;
 use std::env;
@@ -86,14 +92,19 @@ pub async fn get_cities() -> Result<ApiResponse, reqwest::Error> {
 }
 
 pub async fn get_areas(city: String) -> Result<ApiResponse, reqwest::Error> {
-    let url = format!("http://193.187.129.54:5000/api/content/area?q={}", city);
+    let url = format!("http://193.187.129.54:5000/api/content/area?id={}", city);
     let response = reqwest::get(url).await?.json::<ApiResponse>().await?;
 
     Ok(response)
 }
 
 pub async fn start(bot: Bot, dlg: MyDialogue, msg: Message) -> HandlerResult {
-    let products = get_products().await.unwrap();
+    let products = get_products().await.unwrap_or(ApiResponse {
+        status: 200,
+        msg: "".to_string(),
+        description: "".to_string(),
+        data: vec![json!({})],
+    });
 
     let buttons: Vec<InlineKeyboardButton> = products
         .data
@@ -104,7 +115,7 @@ pub async fn start(bot: Bot, dlg: MyDialogue, msg: Message) -> HandlerResult {
             let id = product.get("id").and_then(Value::as_str)?;
             Some(InlineKeyboardButton::callback(
                 format!("{} - {}", name.to_string(), price.to_string()),
-                id.to_string(),
+                format!("{}|{}", id, name),
             ))
         })
         .collect();
@@ -126,24 +137,71 @@ pub async fn start(bot: Bot, dlg: MyDialogue, msg: Message) -> HandlerResult {
 async fn receive_city(
     bot: Bot,
     dlg: MyDialogue,
-    product: String,
+    product: Product,
     q: CallbackQuery,
 ) -> HandlerResult {
     let city = q.data.unwrap();
+    print!("{}", city);
 
-    let areas = get_areas(city.clone()).await.unwrap();
-    let buttons: Vec<InlineKeyboardButton> = areas
+    if city == "back" {
+        let products = get_products().await.unwrap_or(ApiResponse {
+            status: 200,
+            msg: "".to_string(),
+            description: "".to_string(),
+            data: vec![json!({})],
+        });
+
+        let buttons: Vec<InlineKeyboardButton> = products
+            .data
+            .iter()
+            .filter_map(|product| {
+                let name = product.get("name").and_then(Value::as_str)?;
+                let price = product.get("price").and_then(Value::as_str)?;
+                let id = product.get("id").and_then(Value::as_str)?;
+                Some(InlineKeyboardButton::callback(
+                    format!("{} - {}", name.to_string(), price.to_string()),
+                    format!("{}|{}", id, name),
+                ))
+            })
+            .collect();
+
+        let keyboard_rows: Vec<Vec<InlineKeyboardButton>> =
+            buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
+
+        let keyboard = InlineKeyboardMarkup::new(keyboard_rows);
+
+        bot.send_message(dlg.chat_id(), "Выберите товар:")
+            .reply_markup(keyboard)
+            .await
+            .unwrap();
+
+        dlg.update(State::Product).await.unwrap();
+
+        return Ok(());
+    }
+
+    let areas = get_areas(city.clone().split("|").nth(0).unwrap().to_string())
+        .await
+        .unwrap_or(ApiResponse {
+            status: 200,
+            msg: "".to_string(),
+            description: "".to_string(),
+            data: vec![json!({})],
+        });
+    let mut buttons: Vec<InlineKeyboardButton> = areas
         .data
         .iter()
-        .filter_map(|city| {
-            let name = city.get("name").and_then(Value::as_str)?;
-            let id = city.get("id").and_then(Value::as_str)?;
+        .filter_map(|area| {
+            let name = area.get("name").and_then(Value::as_str)?;
+            let id = area.get("id").and_then(Value::as_str)?;
+
             Some(InlineKeyboardButton::callback(
                 name.to_string(),
-                id.to_string(),
+                format!("{}|{}", id, name),
             ))
         })
         .collect();
+    buttons.push(InlineKeyboardButton::callback("Назад", "back"));
 
     let keyboard_rows: Vec<Vec<InlineKeyboardButton>> =
         buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
@@ -154,17 +212,16 @@ async fn receive_city(
         q.message.as_ref().unwrap().id,
         "Выберите район:",
     )
+    .reply_markup(keyboard)
     .await
     .unwrap();
 
-    bot.edit_message_reply_markup(dlg.chat_id(), q.message.as_ref().unwrap().id)
-        .reply_markup(keyboard)
-        .await
-        .unwrap();
-
     dlg.update(State::Area {
         product: product,
-        city: city,
+        city: City {
+            id: city.split("|").nth(0).unwrap().to_string(),
+            name: city.split("|").nth(1).unwrap().to_string(),
+        },
     })
     .await
     .unwrap();
@@ -182,24 +239,24 @@ async fn generate_id() -> String {
 async fn receive_purchase(
     bot: Bot,
     dlg: MyDialogue,
-    (product, city, area): (String, String, String),
+    (product, city, area): (Product, City, Area),
 
     q: CallbackQuery,
 ) -> HandlerResult {
     let data = q.data.unwrap();
 
     if data == "confirm" {
-        let url = "http://193.187.129.54:5000/api/content/area";
+        let url = "http://193.187.129.54:5000/api/purchase";
         let client = reqwest::Client::new();
         let mut map = HashMap::new();
 
         let order_id = generate_id().await;
 
-        map.insert("city", city.clone());
-        map.insert("product", product.clone());
-        map.insert("area", area.clone());
-        map.insert("orderId", order_id.clone());
-        map.insert("userId", dlg.chat_id().0.to_string());
+        map.insert("city", city.id.clone());
+        map.insert("product", product.id.clone());
+        map.insert("area", area.id.clone());
+        map.insert("orderid", order_id.clone());
+        map.insert("userid", dlg.chat_id().0.to_string());
 
         client.post(url).json(&map).send().await.unwrap();
 
@@ -207,8 +264,8 @@ async fn receive_purchase(
             dlg.chat_id(),
             q.message.as_ref().unwrap().id,
             format!(
-                "Ваш заказ {}\n\nГород: {}\n\nРайон: {}\n\nС вами свяжется модератор",
-                order_id, city, area
+                "Ваш заказ {}\n\nтовар:{}\nГород: {}\nРайон: {}\n\nС вами свяжется модератор",
+                order_id, product.name, city.name, area.name
             ),
         )
         .await
@@ -227,11 +284,57 @@ async fn receive_purchase(
 async fn receive_area(
     bot: Bot,
     dlg: MyDialogue,
-    (product, city): (String, String),
+    (product, city): (Product, City),
 
     q: CallbackQuery,
 ) -> HandlerResult {
     let area = q.data.unwrap();
+
+    if area == "back" {
+        let areas = get_areas(city.name.clone().split("|").nth(0).unwrap().to_string())
+            .await
+            .unwrap_or(ApiResponse {
+                status: 200,
+                msg: "".to_string(),
+                description: "".to_string(),
+                data: vec![json!({})],
+            });
+        let mut buttons: Vec<InlineKeyboardButton> = areas
+            .data
+            .iter()
+            .filter_map(|area| {
+                let name = area.get("name").and_then(Value::as_str)?;
+                let id = area.get("id").and_then(Value::as_str)?;
+
+                Some(InlineKeyboardButton::callback(
+                    name.to_string(),
+                    format!("{}|{}", id, name),
+                ))
+            })
+            .collect();
+        buttons.push(InlineKeyboardButton::callback("Назад", "back"));
+
+        let keyboard_rows: Vec<Vec<InlineKeyboardButton>> =
+            buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
+        let keyboard = InlineKeyboardMarkup::new(keyboard_rows);
+
+        bot.send_message(dlg.chat_id(), "Выберите район:")
+            .reply_markup(keyboard)
+            .await
+            .unwrap();
+
+        dlg.update(State::Area {
+            product: product,
+            city: City {
+                id: city.id,
+                name: city.name,
+            },
+        })
+        .await
+        .unwrap();
+
+        return Ok(());
+    }
 
     let keyboard = [
         InlineKeyboardButton::callback("Подтвердить", "confirm"),
@@ -254,7 +357,10 @@ async fn receive_area(
     dlg.update(State::ConfirmPurchase {
         product: product,
         city: city,
-        area: area,
+        area: Area {
+            id: area.split("|").nth(0).unwrap().to_string(),
+            name: area.split("|").nth(1).unwrap().to_string(),
+        },
     })
     .await
     .unwrap();
@@ -265,8 +371,13 @@ async fn receive_area(
 async fn receive_product(bot: Bot, dlg: MyDialogue, q: CallbackQuery) -> HandlerResult {
     let product = q.data.unwrap();
 
-    let cities = get_cities().await.unwrap();
-    let buttons: Vec<InlineKeyboardButton> = cities
+    let cities = get_cities().await.unwrap_or(ApiResponse {
+        status: 200,
+        msg: "".to_string(),
+        description: "".to_string(),
+        data: vec![json!({})],
+    });
+    let mut buttons: Vec<InlineKeyboardButton> = cities
         .data
         .iter()
         .filter_map(|city| {
@@ -274,10 +385,12 @@ async fn receive_product(bot: Bot, dlg: MyDialogue, q: CallbackQuery) -> Handler
             let id = city.get("id").and_then(Value::as_str)?;
             Some(InlineKeyboardButton::callback(
                 name.to_string(),
-                id.to_string(),
+                format!("{}|{}", id, name),
             ))
         })
         .collect();
+
+    buttons.push(InlineKeyboardButton::callback("Назад", "back"));
 
     let keyboard_rows: Vec<Vec<InlineKeyboardButton>> =
         buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
@@ -296,7 +409,14 @@ async fn receive_product(bot: Bot, dlg: MyDialogue, q: CallbackQuery) -> Handler
         .await
         .unwrap();
 
-    dlg.update(State::City { product: product }).await.unwrap();
+    dlg.update(State::City {
+        product: Product {
+            id: product.split("|").nth(0).unwrap().to_string(),
+            name: product.split("|").nth(1).unwrap().to_string(),
+        },
+    })
+    .await
+    .unwrap();
 
     Ok(())
 }
