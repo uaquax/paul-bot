@@ -141,9 +141,14 @@ async fn receive_city(
     q: CallbackQuery,
 ) -> HandlerResult {
     let city = q.data.unwrap();
-    print!("{}", city);
 
     if city == "back" {
+        if let Some(msg) = q.message {
+            bot.delete_message(dlg.chat_id(), msg.id)
+                .await
+                .unwrap_or_default();
+        }
+
         let products = get_products().await.unwrap_or(ApiResponse {
             status: 200,
             msg: "".to_string(),
@@ -291,14 +296,18 @@ async fn receive_area(
     let area = q.data.unwrap();
 
     if area == "back" {
-        let areas = get_areas(city.name.clone().split("|").nth(0).unwrap().to_string())
-            .await
-            .unwrap_or(ApiResponse {
-                status: 200,
-                msg: "".to_string(),
-                description: "".to_string(),
-                data: vec![json!({})],
-            });
+        if let Some(msg) = q.message {
+            bot.delete_message(dlg.chat_id(), msg.id)
+                .await
+                .unwrap_or_default();
+        }
+
+        let areas = get_areas(city.id.clone()).await.unwrap_or(ApiResponse {
+            status: 200,
+            msg: "".to_string(),
+            description: "".to_string(),
+            data: vec![json!({})],
+        });
         let mut buttons: Vec<InlineKeyboardButton> = areas
             .data
             .iter()
